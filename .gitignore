@@ -11,8 +11,8 @@ Desktop.ini
 *.swo
 *~
 
-# Markdown
-*.md
+# Markdown (корень)
+/*.md
 
 # Node
 node_modules/
