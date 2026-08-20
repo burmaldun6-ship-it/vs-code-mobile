@@ -6,9 +6,13 @@ Desktop.ini
 # IDE
 .vscode/
 .idea/
+.obsidian/
 *.swp
 *.swo
 *~
+
+# Markdown
+*.md
 
 # Node
 node_modules/
