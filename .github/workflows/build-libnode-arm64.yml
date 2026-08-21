@@ -13,38 +13,65 @@ permissions:
 env:
   NDK_VERSION: '21.4.7075529'
   ANDROID_API: '24'
+  PYTHON2_VERSION: '2.7.18-1~20.04.7'
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
     steps:
-      - name: Checkout repository
+      - name: 01 - Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: 02 - Set up Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
           cache: ''
 
-      - name: Install host dependencies
+      - name: 03 - Install host dependencies
         run: |
+          set -euxo pipefail
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 python-is-python3 git curl unzip zip
+          sudo apt-get install -y build-essential python3 python-is-python3 git curl unzip zip file ca-certificates
           java -version
-          python --version
+          python3 --version
+          gcc --version | head -n 1
+          make --version | head -n 1
 
-      - name: Download Android command-line tools
+      - name: 04 - Install legacy Python 2.7
         run: |
+          set -euxo pipefail
+          mkdir -p "$RUNNER_TEMP/python2"
+          cd "$RUNNER_TEMP/python2"
+          BASE='https://archive.ubuntu.com/ubuntu/ubuntu/pool/universe/p/python2.7'
+          curl -fsSLO "$BASE/libpython2.7-minimal_${PYTHON2_VERSION}_amd64.deb"
+          curl -fsSLO "$BASE/python2.7-minimal_${PYTHON2_VERSION}_amd64.deb"
+          curl -fsSLO "$BASE/libpython2.7-stdlib_${PYTHON2_VERSION}_amd64.deb"
+          curl -fsSLO "$BASE/python2.7_${PYTHON2_VERSION}_amd64.deb"
+          sudo dpkg -i libpython2.7-minimal_${PYTHON2_VERSION}_amd64.deb || true
+          sudo dpkg -i python2.7-minimal_${PYTHON2_VERSION}_amd64.deb || true
+          sudo dpkg -i libpython2.7-stdlib_${PYTHON2_VERSION}_amd64.deb || true
+          sudo dpkg -i python2.7_${PYTHON2_VERSION}_amd64.deb
+          sudo ln -sf /usr/bin/python2.7 /usr/local/bin/python
+          python --version
+          python2.7 --version
+
+      - name: 05 - Download Android command-line tools
+        run: |
+          set -euxo pipefail
+          rm -rf "$HOME/android-sdk"
           mkdir -p "$HOME/android-sdk/cmdline-tools"
           curl -fsSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -q /tmp/cmdline-tools.zip -d "$HOME/android-sdk/cmdline-tools"
           mv "$HOME/android-sdk/cmdline-tools/cmdline-tools" "$HOME/android-sdk/cmdline-tools/latest"
+          "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" --version
 
-      - name: Install Android SDK and NDK
+      - name: 06 - Install Android SDK and NDK
         shell: bash
         run: |
+          set -euxo pipefail
           export ANDROID_SDK_ROOT="$HOME/android-sdk"
           export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
           yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null || true
@@ -54,32 +81,93 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
           echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          test -f "$ANDROID_NDK_ROOT/build/core/build-local.mk"
+          "$ANDROID_NDK_ROOT/ndk-build" --version || true
 
-      - name: Clone Node.js Mobile
-        run: git clone --depth 1 --branch mobile-master https://github.com/nodejs-mobile/nodejs-mobile.git make_dependencies/nodejs-mobile
+      - name: 07 - Clone Node.js Mobile
+        run: |
+          set -euxo pipefail
+          rm -rf make_dependencies/nodejs-mobile
+          git clone --depth 1 --branch mobile-master https://github.com/nodejs-mobile/nodejs-mobile.git make_dependencies/nodejs-mobile
+          cd make_dependencies/nodejs-mobile
+          git rev-parse HEAD
+          git status --short
 
-      - name: Build libnode.so for arm64-v8a
+      - name: 08 - Verify toolchain and source before build
+        working-directory: make_dependencies/nodejs-mobile
+        run: |
+          set -euxo pipefail
+          echo '=== Host ==='
+          uname -a
+          echo '=== Python ==='
+          which python
+          python --version
+          python -c 'import sys; print(sys.version)'
+          echo '=== Java ==='
+          java -version
+          echo '=== NDK ==='
+          echo "$ANDROID_NDK_ROOT"
+          test -f "$ANDROID_NDK_ROOT/build/core/build-local.mk"
+          "$ANDROID_NDK_ROOT/ndk-build" --version || true
+          echo '=== Android build script ==='
+          sed -n '1,220p' tools/android_build.sh
+          echo '=== Configure header ==='
+          sed -n '1,100p' configure
+
+      - name: 09 - Configure and build libnode.so for arm64-v8a
         working-directory: make_dependencies/nodejs-mobile
         shell: bash
         run: |
+          set -euxo pipefail
           export ANDROID_NDK_HOME="$HOME/android-sdk/ndk/${NDK_VERSION}"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          export PATH="/usr/local/bin:$PATH"
           echo "Using NDK: $ANDROID_NDK_ROOT"
+          echo "Using Python: $(command -v python)"
+          python --version
           test -f "$ANDROID_NDK_ROOT/build/core/build-local.mk"
           chmod +x tools/android_build.sh
-          ./tools/android_build.sh "$ANDROID_NDK_ROOT" arm64
+          ./tools/android_build.sh "$ANDROID_NDK_ROOT" arm64 2>&1 | tee "$GITHUB_WORKSPACE/make_dependencies/build.log"
+
+      - name: 10 - Verify generated ARM64 library
+        if: always()
+        working-directory: make_dependencies/nodejs-mobile
+        run: |
+          set -euxo pipefail
+          echo '=== Build output tree ==='
+          find out_android -maxdepth 3 -type f -print 2>/dev/null || true
+          echo '=== ARM64 library ==='
           test -s out_android/arm64-v8a/libnode.so
           file out_android/arm64-v8a/libnode.so
+          ls -lh out_android/arm64-v8a/libnode.so
+          readelf -h out_android/arm64-v8a/libnode.so | grep -E 'Class|Machine|Type'
 
-      - name: Package artifact
+      - name: 11 - Package artifact
+        if: success()
         run: |
+          set -euxo pipefail
           mkdir -p make_dependencies/artifact/arm64-v8a
           cp make_dependencies/nodejs-mobile/out_android/arm64-v8a/libnode.so make_dependencies/artifact/arm64-v8a/libnode.so
+          cp make_dependencies/build.log make_dependencies/artifact/build.log
+          find make_dependencies/artifact -type f -ls
 
-      - name: Upload libnode artifact
+      - name: 12 - Upload libnode artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: libnode-android-arm64
           path: make_dependencies/artifact
           if-no-files-found: error
           retention-days: 30
+
+      - name: 13 - Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libnode-arm64-build-diagnostics
+          path: |
+            make_dependencies/build.log
+            make_dependencies/nodejs-mobile/out/Release/*.log
+            make_dependencies/nodejs-mobile/out_android/**/*.log
+          if-no-files-found: warn
+          retention-days: 14
