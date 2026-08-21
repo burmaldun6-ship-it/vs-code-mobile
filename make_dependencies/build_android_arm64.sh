@@ -70,8 +70,10 @@ log "Apply Android compatibility patches"
 PATCH_DIR="$ROOT_DIR/make_dependencies/patches/node-${NODE_MAJOR}"
 PATCH_FILE="$PATCH_DIR/android-stack-trace.patch"
 [[ -f "$PATCH_FILE" ]] || fail "No Android compatibility patch set for Node ${NODE_MAJOR}"
-git -C "$SOURCE_DIR" apply --check "$PATCH_FILE"
-git -C "$SOURCE_DIR" apply --verbose "$PATCH_FILE" | tee "$LOG_DIR/patch.log"
+
+# The Node source archive is not a Git repository. GNU patch is the native
+# tool for applying a checked-in unified diff to an extracted source tree.
+patch --batch --forward --fuzz=0 -p1 -d "$SOURCE_DIR" < "$PATCH_FILE" 2>&1 | tee "$LOG_DIR/patch.log"
 
 grep -q '!V8_OS_ANDROID' "$SOURCE_DIR/deps/v8/src/base/debug/stack_trace_posix.cc" || fail "Android stack-trace compatibility patch was not applied"
 
