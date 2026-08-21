@@ -1,6 +1,12 @@
 name: Build upstream Node.js 24.19.0 for Android
 
 on:
+  push:
+    branches:
+      - make-dependencies-arm64
+    paths:
+      - 'scripts/build_upstream_24.sh'
+      - '.github/workflows/build-nodejs-lts-24.yml'
   workflow_dispatch:
     inputs:
       android_api:
@@ -19,7 +25,9 @@ jobs:
     env:
       NODE_VERSION: 24.19.0
       NDK_VERSION: 27.0.12077973
-      ANDROID_API: ${{ inputs.android_api }}
+      ANDROID_API: ${{ inputs.android_api || '24' }}
+      ANDROID_SDK_ROOT: ${{ github.workspace }}/work/android-sdk
+      ANDROID_HOME: ${{ github.workspace }}/work/android-sdk
 
     steps:
       - name: Checkout
@@ -31,6 +39,34 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Install Android NDK 27.0.12077973
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_root="$ANDROID_SDK_ROOT"
+          cmdline_zip="$RUNNER_TEMP/commandlinetools.zip"
+          cmdline_url='https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip'
+          cmdline_sha='2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258'
+
+          mkdir -p "$sdk_root/cmdline-tools"
+          curl -fL --retry 3 --retry-delay 2 "$cmdline_url" -o "$cmdline_zip"
+          echo "$cmdline_sha  $cmdline_zip" | sha256sum -c -
+          rm -rf "$sdk_root/cmdline-tools/latest"
+          unzip -q "$cmdline_zip" -d "$sdk_root/cmdline-tools"
+          mv "$sdk_root/cmdline-tools/cmdline-tools" "$sdk_root/cmdline-tools/latest"
+
+          yes | "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" --licenses >/dev/null || true
+          "$sdk_root/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk_root" "platform-tools" "platforms;android-${ANDROID_API}" "ndk;${NDK_VERSION}"
+
+          ndk_home="$sdk_root/ndk/$NDK_VERSION"
+          test -f "$ndk_home/source.properties"
+          grep -q "Pkg.Revision = ${NDK_VERSION}" "$ndk_home/source.properties"
+          test -x "$ndk_home/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+
+          echo "ANDROID_NDK_HOME=$ndk_home" >> "$GITHUB_ENV"
+          echo "$ndk_home/toolchains/llvm/prebuilt/linux-x86_64/bin" >> "$GITHUB_PATH"
+          "$ndk_home/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version
 
       - name: Build upstream Node.js
         shell: bash
@@ -59,7 +95,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: libnode-upstream-24-arm64-api${{ inputs.android_api }}
+          name: libnode-upstream-24-arm64-api${{ inputs.android_api || '24' }}
           path: |
             ${{ steps.package.outputs.zip }}
             ${{ steps.package.outputs.sha }}
