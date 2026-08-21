@@ -1,0 +1,82 @@
+name: Build nodejs-mobile 18.20.4 for Android
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: Android architecture
+        required: true
+        type: choice
+        default: arm64
+        options:
+          - arm64
+          - arm
+          - x86
+          - x86_64
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      NODEJS_MOBILE_VERSION: 18.20.4
+      NDK_VERSION: 24.0.8215888
+      ANDROID_API: 24
+      ARCH: ${{ inputs.arch }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build nodejs-mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/build_mobile_18.sh
+          scripts/build_mobile_18.sh
+
+      - name: Locate ZIP
+        id: package
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip_path="$(find . -maxdepth 1 -type f -name 'libnode-mobile-18-*.zip' -print -quit)"
+          if [[ -z "$zip_path" ]]; then
+            echo "ZIP artifact not found" >&2
+            exit 1
+          fi
+          sha_path="${zip_path}.sha256"
+          test -f "$sha_path"
+          printf 'zip=%s\n' "$zip_path" >> "$GITHUB_OUTPUT"
+          printf 'sha=%s\n' "$sha_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libnode-mobile-18-${{ inputs.arch }}
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.sha }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-nodejs-mobile-18-${{ inputs.arch }}
+          path: work/logs/
+          retention-days: 14
+          if-no-files-found: warn
