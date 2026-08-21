@@ -62,7 +62,7 @@ jobs:
         working-directory: make_dependencies/nodejs-mobile
         shell: bash
         run: |
-          export ANDROID_NDK_HOME="$GITHUB_WORKSPACE/$ANDROID_SDK_RELATIVE_NDK"
+          export ANDROID_NDK_HOME="$HOME/android-sdk/ndk/${NDK_VERSION}"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
           echo "Using NDK: $ANDROID_NDK_ROOT"
           test -f "$ANDROID_NDK_ROOT/build/core/build-local.mk"
@@ -70,8 +70,6 @@ jobs:
           ./tools/android_build.sh "$ANDROID_NDK_ROOT" arm64
           test -s out_android/arm64-v8a/libnode.so
           file out_android/arm64-v8a/libnode.so
-        env:
-          ANDROID_SDK_RELATIVE_NDK: ../android-sdk/ndk/21.4.7075529
 
       - name: Package artifact
         run: |
