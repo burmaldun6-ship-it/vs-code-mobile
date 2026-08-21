@@ -1,6 +1,14 @@
 name: Build nodejs-mobile 18.20.4 for Android
 
 on:
+  push:
+    branches:
+      - make-dependencies-arm64
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/build-nodejs-mobile-18.yml'
+      - 'README.md'
+      - 'make_dependencies/**'
   workflow_dispatch:
     inputs:
       arch:
@@ -25,7 +33,7 @@ jobs:
       NODEJS_MOBILE_VERSION: 18.20.4
       NDK_VERSION: 24.0.8215888
       ANDROID_API: 24
-      ARCH: ${{ inputs.arch }}
+      ARCH: ${{ inputs.arch || 'arm64' }}
 
     steps:
       - name: Checkout
@@ -65,7 +73,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: libnode-mobile-18-${{ inputs.arch }}
+          name: libnode-mobile-18-${{ inputs.arch || 'arm64' }}
           path: |
             ${{ steps.package.outputs.zip }}
             ${{ steps.package.outputs.sha }}
@@ -76,7 +84,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs-nodejs-mobile-18-${{ inputs.arch }}
+          name: build-logs-nodejs-mobile-18-${{ inputs.arch || 'arm64' }}
           path: work/logs/
           retention-days: 14
           if-no-files-found: warn
