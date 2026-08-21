@@ -41,6 +41,8 @@ else
   [[ "$NODE_VERSION" == v* ]] || NODE_VERSION="v$NODE_VERSION"
 fi
 [[ "$NODE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "Resolved Node version is invalid: $NODE_VERSION"
+NODE_MAJOR="${NODE_VERSION#v}"
+NODE_MAJOR="${NODE_MAJOR%%.*}"
 printf 'Node.js: %s\nAndroid API: %s\nNDK: %s\n' "$NODE_VERSION" "$ANDROID_API" "$NDK_VERSION"
 
 log "Download and verify Node.js source"
@@ -64,6 +66,15 @@ test -x "$SOURCE_DIR/configure"
 test -s "$SOURCE_DIR/android_configure.py"
 test -x "$SOURCE_DIR/android-configure"
 
+log "Apply Android compatibility patches"
+PATCH_DIR="$ROOT_DIR/make_dependencies/patches/node-${NODE_MAJOR}"
+PATCH_FILE="$PATCH_DIR/android-stack-trace.patch"
+[[ -f "$PATCH_FILE" ]] || fail "No Android compatibility patch set for Node ${NODE_MAJOR}"
+git -C "$SOURCE_DIR" apply --check "$PATCH_FILE"
+git -C "$SOURCE_DIR" apply --verbose "$PATCH_FILE" | tee "$LOG_DIR/patch.log"
+
+grep -q '!V8_OS_ANDROID' "$SOURCE_DIR/deps/v8/src/base/debug/stack_trace_posix.cc" || fail "Android stack-trace compatibility patch was not applied"
+
 log "Validate Android toolchain"
 ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
 ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_SDK_ROOT:+$ANDROID_SDK_ROOT/ndk/$NDK_VERSION}}"
@@ -83,13 +94,9 @@ log "Configure Node.js ${NODE_VERSION} for Android ARM64"
 cd "$SOURCE_DIR"
 export CC CXX
 export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME"
-export LDFLAGS="${LDFLAGS:--Wl,-z,max-page-size=16384}"
+export LDFLAGS="${LDFLAGS:--Wl,-z,max-page-size=16384 -llog}"
 
-# Node.js ships the Android cross-configure script for the matching source tree.
-# It validates the Python version and NDK/toolchain, then runs configure once.
 ./android-configure "$ANDROID_NDK_HOME" "$ANDROID_API" arm64 2>&1 | tee "$LOG_DIR/configure.log"
-
-# Re-run configure with --shared so the final build emits libnode.so.
 ./configure --dest-cpu=arm64 --dest-os=android --openssl-no-asm --cross-compiling --shared 2>&1 | tee "$LOG_DIR/reconfigure.log"
 
 test -s Makefile
