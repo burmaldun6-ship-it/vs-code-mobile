@@ -54,10 +54,11 @@ fi
 if [[ "$TRY_SOURCE_BUILD" == "1" ]]; then
   log "Configure"
   cd "$SOURCE_DIR"
-  set +e
-  ./android-configure "$ANDROID_NDK_HOME" "$ANDROID_API" arm64 2>&1 | tee "$LOG_DIR/configure.log"
-  CONFIGURE_STATUS=${PIPESTATUS[0]}
-  set -e
+  if ./android-configure "$ANDROID_NDK_HOME" "$ANDROID_API" arm64 2>&1 | tee "$LOG_DIR/configure.log"; then
+    CONFIGURE_STATUS=0
+  else
+    CONFIGURE_STATUS=${PIPESTATUS[0]}
+  fi
   if [[ "$CONFIGURE_STATUS" -ne 0 ]]; then
     printf 'configure exit status: %s\n' "$CONFIGURE_STATUS" > "$LOG_DIR/source-build-fallback.log"
   fi
@@ -77,10 +78,11 @@ MAKE_STATUS=0
 if [[ "$TRY_SOURCE_BUILD" == "1" && "$CONFIGURE_STATUS" -eq 0 ]]; then
   log "Build from source"
   cd "$SOURCE_DIR"
-  set +e
-  make -j"$(nproc)" 2>&1 | tee "$LOG_DIR/build.log"
-  MAKE_STATUS=${PIPESTATUS[0]}
-  set -e
+  if make -j"$(nproc)" 2>&1 | tee "$LOG_DIR/build.log"; then
+    MAKE_STATUS=0
+  else
+    MAKE_STATUS=${PIPESTATUS[0]}
+  fi
   if [[ "$MAKE_STATUS" -eq 0 ]]; then
     for candidate in \
       "$SOURCE_DIR/out/Release/lib.target/libnode.so" \
@@ -120,7 +122,7 @@ else
   unzip -q "$RELEASE_ZIP" -d "$WORK_DIR/release"
   LIBNODE="$(find "$WORK_DIR/release" -type f -path '*/arm64-v8a/libnode.so' -print -quit)"
   [[ -n "$LIBNODE" && -s "$LIBNODE" ]] || fail "upstream release does not contain arm64-v8a/libnode.so"
-  printf 'Source build attempted: %s\nConfigure status: %s\nMake status: %s\nUsing upstream release: v%s\n' \
+  printf 'Source build requested: %s\nConfigure status: %s\nMake status: %s\nUsing upstream release: v%s\n' \
     "$TRY_SOURCE_BUILD" "$CONFIGURE_STATUS" "$MAKE_STATUS" "$MOBILE_VERSION" > "$LOG_DIR/source-build-fallback.log"
 fi
 
@@ -132,7 +134,6 @@ readelf -h "$LIBNODE" | grep -q 'Machine:.*AArch64' || fail "output is not AArch
 readelf -h "$LIBNODE" | grep -q 'Type:.*DYN' || fail "output is not a shared ELF object"
 
 log "Package"
-rm -rf "$PACKAGE_DIR"
 mkdir -p "$PACKAGE_DIR/arm64-v8a"
 cp "$LIBNODE" "$PACKAGE_DIR/arm64-v8a/libnode.so"
 for log_file in "$LOG_DIR"/*.log; do
