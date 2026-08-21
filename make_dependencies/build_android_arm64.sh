@@ -62,6 +62,7 @@ tar -xJf "$NODE_TARBALL_PATH" -C "$WORK_DIR"
 mv "$WORK_DIR/$TOP_LEVEL" "$SOURCE_DIR"
 test -x "$SOURCE_DIR/configure"
 test -s "$SOURCE_DIR/android_configure.py"
+test -x "$SOURCE_DIR/android-configure"
 
 log "Validate Android toolchain"
 ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
@@ -78,15 +79,17 @@ test -x "$CXX"
 "$CXX" --version
 "$ANDROID_NDK_HOME/ndk-build" --version
 
-log "Configure Node.js 24 for Android ARM64"
+log "Configure Node.js ${NODE_VERSION} for Android ARM64"
 cd "$SOURCE_DIR"
 export CC CXX
-export CC_host="$(command -v gcc)"
-export CXX_host="$(command -v g++)"
 export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME"
 export LDFLAGS="${LDFLAGS:--Wl,-z,max-page-size=16384}"
 
-python3 ./android_configure.py "$ANDROID_NDK_HOME" "$ANDROID_API" arm64 2>&1 | tee "$LOG_DIR/configure.log"
+# Node.js ships the Android cross-configure script for the matching source tree.
+# It validates the Python version and NDK/toolchain, then runs configure once.
+./android-configure "$ANDROID_NDK_HOME" "$ANDROID_API" arm64 2>&1 | tee "$LOG_DIR/configure.log"
+
+# Re-run configure with --shared so the final build emits libnode.so.
 ./configure --dest-cpu=arm64 --dest-os=android --openssl-no-asm --cross-compiling --shared 2>&1 | tee "$LOG_DIR/reconfigure.log"
 
 test -s Makefile
