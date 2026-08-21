@@ -13,13 +13,14 @@ permissions:
 env:
   ANDROID_API: '24'
   NDK_VERSION: '26.3.11579264'
+  TRY_SOURCE_BUILD: '0'
   CMDLINE_TOOLS_SHA256: '2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258'
 
 jobs:
   build:
     name: Android ARM64 libnode
     runs-on: ubuntu-22.04
-    timeout-minutes: 180
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -49,7 +50,7 @@ jobs:
           SDK="$HOME/android-sdk"
           CMDLINE_ZIP=/tmp/commandlinetools-linux.zip
           mkdir -p "$SDK/cmdline-tools"
-          curl --proto '=https' --tlsv1.2 -fsSL -o "$CMDLINE_ZIP" https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$CMDLINE_ZIP" https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           printf '%s  %s\n' "$CMDLINE_TOOLS_SHA256" "$CMDLINE_ZIP" | sha256sum -c -
           unzip -q "$CMDLINE_ZIP" -d "$SDK/cmdline-tools"
           mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
@@ -84,6 +85,15 @@ jobs:
           chmod +x make_dependencies/build_android_arm64.sh
           make_dependencies/build_android_arm64.sh
 
+      - name: Verify package files
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP="libnode-android-arm64-node-18.20.4.zip"
+          test -s "$ZIP"
+          test -s "$ZIP.sha256"
+          sha256sum -c "$ZIP.sha256"
+
       - name: Upload build ZIP
         if: success()
         uses: actions/upload-artifact@v7
@@ -100,7 +110,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: libnode-android-arm64-logs
-          path: |
-            make_dependencies/logs
+          path: make_dependencies/logs
           if-no-files-found: warn
           retention-days: 14
