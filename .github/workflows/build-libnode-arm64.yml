@@ -91,7 +91,7 @@ jobs:
       - name: Build libnode
         shell: bash
         env:
-          LDFLAGS: '-Wl,-z,max-page-size=16384'
+          LDFLAGS: '-Wl,-z,max-page-size=16384 -llog'
         run: |
           set -euo pipefail
           chmod +x make_dependencies/build_android_arm64.sh
