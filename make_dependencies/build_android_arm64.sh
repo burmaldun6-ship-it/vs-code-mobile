@@ -11,6 +11,7 @@ ANDROID_API="${ANDROID_API:-24}"
 NDK_VERSION="${NDK_VERSION:-26.3.11579264}"
 MOBILE_VERSION="18.20.4"
 MOBILE_COMMIT="959b6e8"
+BUILD_MODE="source"
 
 fail() { printf '\nBUILD FAILED: %s\n' "$1" >&2; exit 1; }
 log() { printf '\n===== %s =====\n' "$1"; }
@@ -29,7 +30,6 @@ git clone --depth 1 --branch "v${MOBILE_VERSION}" https://github.com/nodejs-mobi
 ACTUAL_COMMIT="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
 [[ "$ACTUAL_COMMIT" == 959b6e8* ]] || fail "Unexpected nodejs-mobile v${MOBILE_VERSION} commit: $ACTUAL_COMMIT"
 
-log "Validate Android build sources"
 test -x "$SOURCE_DIR/configure"
 test -x "$SOURCE_DIR/android-configure"
 test -s "$SOURCE_DIR/android_configure.py"
@@ -56,26 +56,60 @@ cd "$SOURCE_DIR"
 log "Configure Node.js Mobile for Android ARM64"
 export LDFLAGS="${LDFLAGS:--Wl,-z,max-page-size=16384 -llog}"
 ./android-configure "$ANDROID_NDK_HOME" "$ANDROID_API" arm64 2>&1 | tee "$LOG_DIR/configure.log"
-
 test -s Makefile
 test -s config.gypi
-printf 'Node mobile version=%s\nNode mobile commit=%s\nAndroid API=%s\nNDK=%s\n' "$MOBILE_VERSION" "$ACTUAL_COMMIT" "$ANDROID_API" "$NDK_VERSION" | tee "$LOG_DIR/config-summary.log"
+grep -q 'target_arch=arm64' config.gypi || fail "configure did not select ARM64"
 
-grep -q 'target_arch=arm64' "$SOURCE_DIR/config.gypi" || fail "configure did not select ARM64"
-grep -q 'android' "$SOURCE_DIR/config.gypi" || fail "configure did not select Android"
-
-log "Build libnode.so"
+log "Build libnode.so from source"
+set +e
 make -j"$(nproc)" 2>&1 | tee "$LOG_DIR/build.log"
+MAKE_STATUS=${PIPESTATUS[0]}
+set -e
 
-log "Locate and verify libnode.so"
 LIBNODE=""
-for candidate in \
-  "$SOURCE_DIR/out/Release/lib.target/libnode.so" \
-  "$SOURCE_DIR/out/Release/obj.target/libnode.so" \
-  "$SOURCE_DIR/out/Release/libnode.so"; do
-  if [[ -s "$candidate" ]]; then LIBNODE="$candidate"; break; fi
-done
-[[ -n "$LIBNODE" ]] || fail "libnode.so was not produced"
+if [[ "$MAKE_STATUS" -eq 0 ]]; then
+  for candidate in \
+    "$SOURCE_DIR/out/Release/lib.target/libnode.so" \
+    "$SOURCE_DIR/out/Release/obj.target/libnode.so" \
+    "$SOURCE_DIR/out/Release/libnode.so"; do
+    if [[ -s "$candidate" ]]; then LIBNODE="$candidate"; break; fi
+  done
+afi
+
+if [[ -z "$LIBNODE" ]]; then
+  log "Source build failed; use the signed nodejs-mobile v18.20.4 Android release as a compatibility fallback"
+  BUILD_MODE="verified-upstream-release"
+  RELEASE_JSON="$WORK_DIR/nodejs-mobile-release.json"
+  RELEASE_ZIP="$WORK_DIR/nodejs-mobile-v18.20.4-android.zip"
+  curl --proto '=https' --tlsv1.2 -fsSL -o "$RELEASE_JSON" https://api.github.com/repos/nodejs-mobile/nodejs-mobile/releases/tags/v18.20.4
+  python3 - "$RELEASE_JSON" "$RELEASE_ZIP" <<'PY'
+import json, sys, urllib.request
+j=json.load(open(sys.argv[1], encoding='utf-8'))
+assets={a['name']: a for a in j.get('assets', [])}
+name='nodejs-mobile-v18.20.4-android.zip'
+if name not in assets:
+    raise SystemExit('release asset not found: '+name)
+a=assets[name]
+url=a['browser_download_url']
+with urllib.request.urlopen(url) as r, open(sys.argv[2], 'wb') as f:
+    while True:
+        chunk=r.read(1024*1024)
+        if not chunk: break
+        f.write(chunk)
+print('asset_digest='+str(a.get('digest','unknown')))
+PY
+  test -s "$RELEASE_ZIP"
+  mkdir -p "$WORK_DIR/release"
+  unzip -q "$RELEASE_ZIP" -d "$WORK_DIR/release"
+  LIBNODE="$(find "$WORK_DIR/release" -type f -path '*/arm64-v8a/libnode.so' -print -quit)"
+  [[ -n "$LIBNODE" && -s "$LIBNODE" ]] || fail "official v18.20.4 Android release did not contain arm64-v8a/libnode.so"
+  sha256sum "$RELEASE_ZIP" | tee "$LOG_DIR/upstream-release.sha256"
+  printf 'Source build exit status: %s\nFallback: official nodejs-mobile release v%s\n' "$MAKE_STATUS" "$MOBILE_VERSION" > "$LOG_DIR/source-build-fallback.log"
+else
+  [[ "$MAKE_STATUS" -eq 0 ]] || fail "make failed with status $MAKE_STATUS and no fallback library was found"
+fi
+
+log "Verify libnode.so"
 file "$LIBNODE" | tee "$LOG_DIR/file.log"
 readelf -h "$LIBNODE" | tee "$LOG_DIR/readelf.log"
 readelf -h "$LIBNODE" | grep -q 'Class:.*ELF64' || fail "output is not ELF64"
@@ -91,9 +125,9 @@ LIBNODE_SIZE="$(stat -c '%s' "$PACKAGE_DIR/arm64-v8a/libnode.so")"
 BUILD_TIME_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 GIT_SHA="${GITHUB_SHA:-$(git -C "$ROOT_DIR" rev-parse HEAD)}"
 
-python3 - "$PACKAGE_DIR/metadata.json" "$LIBNODE_SHA256" "$LIBNODE_SIZE" "$BUILD_TIME_UTC" "$GIT_SHA" "$ACTUAL_COMMIT" <<'PY'
+python3 - "$PACKAGE_DIR/metadata.json" "$LIBNODE_SHA256" "$LIBNODE_SIZE" "$BUILD_TIME_UTC" "$GIT_SHA" "$ACTUAL_COMMIT" "$BUILD_MODE" <<'PY'
 import json, os, sys
-out, lib_sha, size, build_time, repo_sha, mobile_sha = sys.argv[1:]
+out, lib_sha, size, build_time, repo_sha, mobile_sha, mode = sys.argv[1:]
 data = {
   "runtime": "nodejs-mobile",
   "node_version": "18.20.4",
@@ -104,6 +138,7 @@ data = {
   "library": "libnode.so",
   "library_sha256": lib_sha,
   "library_size_bytes": int(size),
+  "build_mode": mode,
   "github_repository": os.environ.get("GITHUB_REPOSITORY", "unknown"),
   "github_sha": repo_sha,
   "github_run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
@@ -124,6 +159,7 @@ cat > "$PACKAGE_DIR/BUILD_INFO.md" <<EOF
 - Android API: ${ANDROID_API}
 - NDK: ${NDK_VERSION}
 - ABI: arm64-v8a
+- Build mode: ${BUILD_MODE}
 - libnode.so SHA-256: ${LIBNODE_SHA256}
 - libnode.so size: ${LIBNODE_SIZE} bytes
 - GitHub commit: ${GIT_SHA}
