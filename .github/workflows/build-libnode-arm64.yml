@@ -6,23 +6,13 @@ on:
       - make_dependencies/**
       - .github/workflows/build-libnode-arm64.yml
   workflow_dispatch:
-    inputs:
-      node_version:
-        description: Full Node.js version or lts
-        required: false
-        default: lts
-      android_api:
-        description: Android API level (minimum 24)
-        required: false
-        default: '24'
 
 permissions:
   contents: read
 
 env:
-  NODE_VERSION_REQUEST: ${{ inputs.node_version || 'lts' }}
-  ANDROID_API: ${{ inputs.android_api || '24' }}
-  NDK_VERSION: '27.3.13750724'
+  ANDROID_API: '24'
+  NDK_VERSION: '26.3.11579264'
   CMDLINE_TOOLS_SHA256: '2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258'
 
 jobs:
@@ -50,8 +40,6 @@ jobs:
           sudo apt-get install -y build-essential python3 git curl unzip zip xz-utils file binutils ca-certificates shellcheck
           python3 --version
           java -version
-          gcc --version
-          make --version
           shellcheck --version
 
       - name: Install Android SDK and NDK
@@ -79,7 +67,6 @@ jobs:
           echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo "$SDK/platform-tools" >> "$GITHUB_PATH"
           test -x "$SDK/ndk/${NDK_VERSION}/ndk-build"
-          "$SDK/ndk/${NDK_VERSION}/ndk-build" --version
 
       - name: Static-check build script
         shell: bash
@@ -115,6 +102,5 @@ jobs:
           name: libnode-android-arm64-logs
           path: |
             make_dependencies/logs
-            make_dependencies/work/source/SHASUMS256.txt
           if-no-files-found: warn
           retention-days: 14
