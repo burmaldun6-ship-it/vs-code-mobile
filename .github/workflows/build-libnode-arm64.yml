@@ -1,20 +1,20 @@
-name: Build libnode Android ARM64 (current LTS)
+name: Build libnode Android ARM64
 
 on:
+  push:
+    paths:
+      - make_dependencies/**
+      - .github/workflows/build-libnode-arm64.yml
   workflow_dispatch:
     inputs:
       node_version:
-        description: Node.js version (use lts for newest LTS, or exact version such as 24.19.0)
+        description: Node.js version or lts
         required: false
         default: lts
       android_api:
         description: Android API level
         required: false
         default: '24'
-  push:
-    paths:
-      - 'make_dependencies/**'
-      - '.github/workflows/build-libnode-arm64.yml'
 
 permissions:
   contents: read
@@ -26,233 +26,69 @@ env:
 
 jobs:
   build:
-    name: Build current LTS Node libnode for Android ARM64
+    name: Android ARM64 libnode
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
-      - name: 01 - Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 02 - Set up Java 17 for Android SDK tools
+      - name: Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: ''
 
-      - name: 03 - Install host dependencies
-        shell: bash
+      - name: Install host tools
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 git curl unzip zip xz-utils file binutils ca-certificates pkg-config ninja-build
-          java -version
+          sudo apt-get install -y build-essential python3 git curl unzip zip xz-utils file binutils ca-certificates
           python3 --version
-          gcc --version | sed -n '1p'
-          g++ --version | sed -n '1p'
-          make --version | sed -n '1p'
-          ninja --version
+          java -version
+          gcc --version
+          make --version
 
-      - name: 04 - Resolve Node.js LTS version
-        shell: bash
+      - name: Install Android SDK and NDK
         run: |
-          set -euxo pipefail
-          REQUESTED="${NODE_VERSION_REQUEST}"
-          if [[ "$REQUESTED" == "lts" ]]; then
-            NODE_VERSION="$(curl -fsSL https://nodejs.org/dist/index.json | python3 -c 'import json,sys; items=json.load(sys.stdin); print(next(x["version"] for x in items if x.get("lts")))')"
-          else
-            NODE_VERSION="$REQUESTED"
-            [[ "$NODE_VERSION" == v* ]] || NODE_VERSION="v$NODE_VERSION"
-          fi
-          echo "NODE_VERSION=$NODE_VERSION" >> "$GITHUB_ENV"
-          echo "Resolved Node.js version: $NODE_VERSION"
-
-      - name: 05 - Download and verify Node.js source
-        shell: bash
-        run: |
-          set -euxo pipefail
-          mkdir -p make_dependencies/source
-          NODE_TARBALL="node-${NODE_VERSION}.tar.xz"
-          curl -fsSL -o "make_dependencies/source/${NODE_TARBALL}" "https://nodejs.org/dist/${NODE_VERSION}/${NODE_TARBALL}"
-          curl -fsSL -o make_dependencies/source/SHASUMS256.txt "https://nodejs.org/dist/${NODE_VERSION}/SHASUMS256.txt"
-          cd make_dependencies/source
-          grep "  ${NODE_TARBALL}$" SHASUMS256.txt
-          sha256sum --ignore-missing -c SHASUMS256.txt --strict
-          echo "NODE_SOURCE_TARBALL_SHA256=$(sha256sum "${NODE_TARBALL}" | awk '{print $1}')" >> "$GITHUB_ENV"
-          tar -tf "${NODE_TARBALL}" | sed -n '1p'
-
-      - name: 06 - Download Node.js Mobile Android build scripts
-        shell: bash
-        run: |
-          set -euxo pipefail
-          rm -rf make_dependencies/nodejs-mobile-tools
-          git clone --depth 1 https://github.com/nodejs-mobile/nodejs-mobile.git make_dependencies/nodejs-mobile-tools
-          cd make_dependencies/nodejs-mobile-tools
-          MOBILE_TOOLS_SHA="$(git rev-parse HEAD)"
-          echo "NODEJS_MOBILE_TOOLS_SHA=$MOBILE_TOOLS_SHA" >> "$GITHUB_ENV"
-          test -s android-configure
-          test -s android_configure.py
-          cp android-configure "$GITHUB_WORKSPACE/make_dependencies/android-configure"
-          cp android_configure.py "$GITHUB_WORKSPACE/make_dependencies/android_configure.py"
-          chmod +x "$GITHUB_WORKSPACE/make_dependencies/android-configure"
-          echo "Using nodejs-mobile scripts commit: $MOBILE_TOOLS_SHA"
-          sed -n '1,120p' android_configure.py
-
-      - name: 07 - Download Android command-line tools
-        shell: bash
-        run: |
-          set -euxo pipefail
-          rm -rf "$HOME/android-sdk"
-          mkdir -p "$HOME/android-sdk/cmdline-tools"
+          set -euo pipefail
+          SDK="$HOME/android-sdk"
+          mkdir -p "$SDK/cmdline-tools"
           curl -fsSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -q /tmp/cmdline-tools.zip -d "$HOME/android-sdk/cmdline-tools"
-          mv "$HOME/android-sdk/cmdline-tools/cmdline-tools" "$HOME/android-sdk/cmdline-tools/latest"
-          "$HOME/android-sdk/cmdline-tools/latest/bin/sdkmanager" --version
+          unzip -q /tmp/cmdline-tools.zip -d "$SDK/cmdline-tools"
+          mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          SDKMANAGER="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --sdk_root="$SDK" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="$SDK" "platform-tools" "platforms;android-${ANDROID_API}" "ndk;${NDK_VERSION}"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$SDK/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$SDK/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          test -x "$SDK/ndk/${NDK_VERSION}/ndk-build"
+          "$SDK/ndk/${NDK_VERSION}/ndk-build" --version
 
-      - name: 08 - Install Android SDK and NDK
-        shell: bash
+      - name: Build libnode
         run: |
-          set -euxo pipefail
-          export ANDROID_SDK_ROOT="$HOME/android-sdk"
-          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
-          yes | sdkmanager --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null || true
-          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-${ANDROID_API}" "ndk;${NDK_VERSION}"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
-          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
-          test -f "$ANDROID_NDK_ROOT/build/core/build-local.mk"
-          "$ANDROID_NDK_ROOT/ndk-build" --version || true
+          set -euo pipefail
+          chmod +x make_dependencies/build_android_arm64.sh
+          make_dependencies/build_android_arm64.sh
 
-      - name: 09 - Extract Node.js source
-        shell: bash
-        run: |
-          set -euxo pipefail
-          rm -rf make_dependencies/node-source
-          mkdir -p make_dependencies/node-source
-          tar -xJf "make_dependencies/source/node-${NODE_VERSION}.tar.xz" -C make_dependencies/node-source --strip-components=1
-          test -f make_dependencies/node-source/configure
-          test -f make_dependencies/node-source/Makefile
-          node --version || true
-          find make_dependencies/node-source -maxdepth 1 -type f | sort | sed -n '1,80p'
-
-      - name: 10 - Verify Node.js Mobile Android configuration scripts
-        shell: bash
-        run: |
-          set -euxo pipefail
-          test -x make_dependencies/android-configure
-          test -s make_dependencies/android_configure.py
-          grep -n "android-arm64\|arm64-v8a\|ANDROID_NDK\|--shared" make_dependencies/android_configure make_dependencies/android_configure.py || true
-          "$ANDROID_NDK_ROOT/ndk-build" --version || true
-
-      - name: 11 - Configure Node.js for Android ARM64
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cd make_dependencies/node-source
-          export ANDROID_NDK_HOME="$HOME/android-sdk/ndk/${NDK_VERSION}"
-          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
-          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
-          export AR="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
-          export CC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
-          export CXX="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++"
-          export CFLAGS="-fPIC"
-          export CXXFLAGS="-fPIC"
-          echo "CC=$CC"
-          echo "CXX=$CXX"
-          "$CC" --version
-          ./configure --dest-cpu=arm64 --dest-os=android --cross-compiling --shared --without-npm --without-corepack --openssl-no-asm 2>&1 | tee "$GITHUB_WORKSPACE/make_dependencies/configure.log"
-          test -f Makefile
-
-      - name: 12 - Build libnode.so
-        shell: bash
-        run: |
-          set -euxo pipefail
-          cd make_dependencies/node-source
-          export ANDROID_NDK_HOME="$HOME/android-sdk/ndk/${NDK_VERSION}"
-          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
-          export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
-          export CC="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
-          export CXX="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++"
-          make -j"$(nproc)" 2>&1 | tee "$GITHUB_WORKSPACE/make_dependencies/build.log"
-
-      - name: 13 - Verify ARM64 libnode.so
-        if: always()
-        shell: bash
-        run: |
-          set -euxo pipefail
-          find make_dependencies/node-source -type f -name 'libnode.so' -print
-          LIBNODE="$(find make_dependencies/node-source -type f -name 'libnode.so' | head -n 1)"
-          test -n "$LIBNODE"
-          test -s "$LIBNODE"
-          file "$LIBNODE"
-          readelf -h "$LIBNODE" | grep -E 'Class|Machine|Type'
-          echo "LIBNODE_PATH=$LIBNODE" >> "$GITHUB_ENV"
-
-      - name: 14 - Create metadata and ZIP package
-        if: success()
-        shell: bash
-        run: |
-          set -euxo pipefail
-          mkdir -p make_dependencies/package/arm64-v8a
-          cp "$LIBNODE_PATH" make_dependencies/package/arm64-v8a/libnode.so
-          LIB_SHA256="$(sha256sum make_dependencies/package/arm64-v8a/libnode.so | awk '{print $1}')"
-          LIB_SIZE="$(stat -c '%s' make_dependencies/package/arm64-v8a/libnode.so)"
-          cat > make_dependencies/package/metadata.json <<EOF
-{
-  "node_version": "${NODE_VERSION}",
-  "node_source_sha256": "${NODE_SOURCE_TARBALL_SHA256}",
-  "nodejs_mobile_tools_commit": "${NODEJS_MOBILE_TOOLS_SHA}",
-  "android_api": "${ANDROID_API}",
-  "ndk_version": "${NDK_VERSION}",
-  "abi": "arm64-v8a",
-  "library": "libnode.so",
-  "library_sha256": "${LIB_SHA256}",
-  "library_size_bytes": ${LIB_SIZE},
-  "github_sha": "${GITHUB_SHA}",
-  "runner_os": "${RUNNER_OS}"
-}
-EOF
-          cat > make_dependencies/package/BUILD_INFO.md <<EOF
-# libnode Android ARM64 build
-
-- Node.js: ${NODE_VERSION}
-- Android API: ${ANDROID_API}
-- Android NDK: ${NDK_VERSION}
-- ABI: arm64-v8a
-- Node source SHA-256: ${NODE_SOURCE_TARBALL_SHA256}
-- nodejs-mobile tools commit: ${NODEJS_MOBILE_TOOLS_SHA}
-- GitHub commit: ${GITHUB_SHA}
-- libnode.so SHA-256: ${LIB_SHA256}
-- libnode.so size: ${LIB_SIZE} bytes
-EOF
-          cp make_dependencies/configure.log make_dependencies/package/configure.log
-          cp make_dependencies/build.log make_dependencies/package/build.log
-          ZIP="libnode-android-arm64-${NODE_VERSION}.zip"
-          (cd make_dependencies/package && zip -r "../../${ZIP}" .)
-          sha256sum "${ZIP}" > "${ZIP}.sha256"
-          ls -lh "${ZIP}" "${ZIP}.sha256"
-
-      - name: 15 - Upload ZIP artifact
-        if: success()
+      - name: Upload build ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: libnode-android-arm64-${{ env.NODE_VERSION }}
+          name: libnode-android-arm64
           path: |
-            libnode-android-arm64-${{ env.NODE_VERSION }}.zip
-            libnode-android-arm64-${{ env.NODE_VERSION }}.zip.sha256
+            libnode-android-arm64-*.zip
+            libnode-android-arm64-*.zip.sha256
           if-no-files-found: error
           retention-days: 30
 
-      - name: 16 - Upload diagnostics on failure
-        if: failure()
+      - name: Upload logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: libnode-arm64-build-diagnostics
-          path: |
-            make_dependencies/configure.log
-            make_dependencies/build.log
-            make_dependencies/source/SHASUMS256.txt
+          name: libnode-android-arm64-logs
+          path: make_dependencies/logs
           if-no-files-found: warn
           retention-days: 14
