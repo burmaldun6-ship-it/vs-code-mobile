@@ -23,7 +23,6 @@ env:
   NODE_VERSION_REQUEST: ${{ inputs.node_version || 'lts' }}
   ANDROID_API: ${{ inputs.android_api || '24' }}
   NDK_VERSION: '27.3.13750724'
-  MOBILE_TOOLS_COMMIT: 'd9552e0e01ed5bdbe12a31d1ce6c0877a4f39580'
   CMDLINE_TOOLS_SHA256: '2d2d50857e4eb553af5a6dc3ad507a17adf43d115264b1afc116f95c92e5e258'
 
 jobs:
