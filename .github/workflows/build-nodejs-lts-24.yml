@@ -21,7 +21,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 360
     env:
       NODE_VERSION: 24.19.0
       NDK_VERSION: 27.0.12077973
