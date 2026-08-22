@@ -28,6 +28,12 @@ jobs:
       ANDROID_API: ${{ inputs.android_api || '24' }}
       ANDROID_SDK_ROOT: ${{ github.workspace }}/work/android-sdk
       ANDROID_HOME: ${{ github.workspace }}/work/android-sdk
+      # Node.js cross-builds need a native host toolchain for ICU/GYP tools
+      # such as icupkg; CC/CXX remain the Android target compiler.
+      CC_host: /usr/bin/gcc
+      CXX_host: /usr/bin/g++
+      AR_host: /usr/bin/ar
+      LD_host: /usr/bin/ld
 
     steps:
       - name: Checkout
