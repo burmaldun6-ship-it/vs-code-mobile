@@ -95,7 +95,7 @@ export AR="llvm-ar"
 export LINK="$CXX"
 export STRIP="llvm-strip"
 
-# Node.js' Android GYP configuration requires android_ndk_path explicitly.
+# Node.js Android GYP configuration requires android_ndk_path explicitly.
 export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME"
 export npm_config_arch=arm64
 export npm_config_platform=android
@@ -104,7 +104,6 @@ for tool in "$CC" "$CXX" "$AR" "$STRIP"; do command -v "$tool" >/dev/null || { e
 
 echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
 echo "GYP_DEFINES=$GYP_DEFINES"
-
 echo "CC=$CC"
 echo "CXX=$CXX"
 
@@ -115,7 +114,6 @@ echo "CXX=$CXX"
     --dest-os=android \
     --shared \
     --without-snapshot \
-    --cross-compiling-only \
     --with-intl=small-icu \
     --openssl-no-asm
 } 2>&1 | tee "$LOG_DIR/configure.log"
@@ -143,6 +141,7 @@ cp "$LIBNODE" "$ARTIFACTS_DIR/arm64-v8a/libnode.so"
 library_sha256="$(sha256sum "$ARTIFACTS_DIR/arm64-v8a/libnode.so" | awk '{print $1}')"
 library_size_bytes="$(stat -c '%s' "$ARTIFACTS_DIR/arm64-v8a/libnode.so")"
 build_time_utc="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+export library_sha256 library_size_bytes build_time_utc
 python3 - "$ARTIFACTS_DIR/metadata.json" <<'PY'
 import json, os, pathlib, sys
 p=pathlib.Path(sys.argv[1])
