@@ -1,3 +1,33 @@
+# Build outputs
+work/
+artifacts/
+*.log
+*.zip
+*.tar.xz
+build/
+dist/
+*.apk
+*.aab
+*.so
+*.node
+*.o
+*.obj
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.package-lock.json
+
+# Android
+.gradle/
+local.properties
+*.hprof
+.cxx/
+app/build/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -10,39 +40,3 @@ Desktop.ini
 *.swp
 *.swo
 *~
-
-# Markdown (корень)
-/*.md
-
-# Node
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.npm
-.package-lock.json
-
-# Build
-build/
-dist/
-*.apk
-*.aab
-*.so
-*.node
-*.o
-*.obj
-
-# Android
-.gradle/
-local.properties
-*.hprof
-.cxx/
-app/build/
-
-# Logs
-*.log
-
-# Temp
-tmp/
-temp/
-.tmp/
