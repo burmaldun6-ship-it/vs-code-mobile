@@ -7,6 +7,7 @@ ANDROID_API="${ANDROID_API:-24}"
 WORK_DIR="${WORK_DIR:-work}"
 LOG_DIR="$WORK_DIR/logs"
 ARTIFACTS_DIR="${ARTIFACTS_DIR:-artifacts}"
+MAKE_JOBS="${MAKE_JOBS:-$(nproc)}"
 
 mkdir -p "$LOG_DIR"
 rm -rf "$WORK_DIR/node-v$NODE_VERSION" "$ARTIFACTS_DIR"
@@ -19,6 +20,7 @@ validate_regex() {
 validate_regex "NODE_VERSION" "$NODE_VERSION" '^[0-9]+\.[0-9]+\.[0-9]+$'
 validate_regex "NDK_VERSION" "$NDK_VERSION" '^[0-9]+\.[0-9]+\.[0-9]+$'
 validate_regex "ANDROID_API" "$ANDROID_API" '^[0-9]+$'
+validate_regex "MAKE_JOBS" "$MAKE_JOBS" '^[1-9][0-9]*$'
 validate_regex "GITHUB_RUN_ID" "${GITHUB_RUN_ID:-0}" '^[0-9]+$'
 validate_regex "GITHUB_SHA" "${GITHUB_SHA:-0000000000000000000000000000000000000000}" '^[0-9a-f]{40}$'
 
@@ -62,6 +64,17 @@ install_ndk
 sudo apt-get update
 sudo apt-get install -y --no-install-recommends build-essential git python3 gcc-multilib g++-multilib file binutils zip unzip xz-utils
 
+{
+  echo "=== build host diagnostics ==="
+  date -u
+  uname -a
+  nproc
+  free -h
+  df -h "$GITHUB_WORKSPACE" 2>/dev/null || df -h .
+  echo "MAKE_JOBS=$MAKE_JOBS"
+  echo "=============================="
+} | tee "$LOG_DIR/host.log"
+
 SOURCE_FILENAME="node-v$NODE_VERSION.tar.xz"
 SOURCE_URL="https://nodejs.org/dist/v$NODE_VERSION/$SOURCE_FILENAME"
 SUMS_URL="https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt"
@@ -88,7 +101,29 @@ tar -xJf "$ARCHIVE" -C "$WORK_DIR"
 
 NODE_DIR="$WORK_DIR/node-v$NODE_VERSION"
 TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+CPU_FEATURES_DIR="$ANDROID_NDK_HOME/sources/android/cpufeatures"
 export PATH="$TOOLCHAIN_BIN:$PATH"
+
+# NDK r27 keeps the deprecated cpufeatures source for source compatibility.
+# Node 24's zlib GYP build enables ARM NEON on arm64 and its Android
+# cpu_features.c calls android_getCpuFeatures(). The GYP file does not wire
+# the NDK cpufeatures implementation into libzlib, so compile that source
+# directly into libzlib. This preserves the ARM SIMD path instead of disabling
+# it and fixes the undefined symbol at the final openssl-cli link.
+test -f "$CPU_FEATURES_DIR/cpu-features.c"
+test -f "$CPU_FEATURES_DIR/cpu-features.h"
+python3 - "$NODE_DIR/deps/zlib/zlib.gyp" "$CPU_FEATURES_DIR" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+cpufeatures = pathlib.Path(sys.argv[2]).as_posix()
+s = p.read_text()
+marker = "          'sources': [\n            '<!@pymod_do_main(GN-scraper \"<(ZLIB_ROOT)/BUILD.gn\" \"\\\\\"zlib\\\\\".*?sources = \")',\n          ],\n"
+replacement = "          'sources': [\n            '<!@pymod_do_main(GN-scraper \"<(ZLIB_ROOT)/BUILD.gn\" \"\\\\\"zlib\\\\\".*?sources = \")',\n            '%s/cpu-features.c',\n          ],\n          'include_dirs': [ '<(ZLIB_ROOT)', '%s' ],\n" % (cpufeatures, cpufeatures)
+if marker not in s:
+    raise SystemExit('zlib.gyp marker not found; refusing to patch unknown Node source')
+s = s.replace(marker, replacement, 1)
+p.write_text(s)
+PY
 
 # Target toolchain: Android arm64-v8a.
 export CC="aarch64-linux-android${ANDROID_API}-clang"
@@ -107,13 +142,10 @@ export RANLIB_host="/usr/bin/ranlib"
 export STRIP_host="/usr/bin/strip"
 export LINK_host="/usr/bin/g++"
 
-# Node 24's GYP zlib definition enables ARM NEON and compiles cpu_features.c when
-# arm_fpu=neon. Its Android path includes <cpu-features.h> and calls
-# android_getCpuFeatures(), but the GYP build does not wire Chromium's
-# third_party/cpu_features:ndk_compat GN dependency into the zlib target.
-# Disable only zlib's optional ARM SIMD path; this keeps the arm64 target intact
-# and avoids an undeclared Android cpufeatures runtime dependency.
-export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 arm_fpu=none host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME"
+# Keep ARM64 NEON enabled. The previous workaround used arm_fpu=none, but
+# configure/GYP still generated the arm64 SIMD targets. The correct fix is to
+# provide the missing Android cpufeatures implementation above.
+export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME"
 export npm_config_arch=arm64
 export npm_config_platform=android
 
@@ -122,6 +154,7 @@ for tool in "$CC" "$CXX" "$AR" "$STRIP" "$CC_host" "$CXX_host" "$AR_host" "$AS_h
 done
 
 echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+echo "CPU_FEATURES_DIR=$CPU_FEATURES_DIR"
 echo "GYP_DEFINES=$GYP_DEFINES"
 echo "CC=$CC"
 echo "CXX=$CXX"
@@ -129,6 +162,7 @@ echo "CC_host=$CC_host"
 echo "CXX_host=$CXX_host"
 echo "AR_host=$AR_host"
 echo "LD_host=$LD_host"
+echo "MAKE_JOBS=$MAKE_JOBS"
 
 {
   cd "$NODE_DIR"
@@ -139,12 +173,14 @@ echo "LD_host=$LD_host"
     --cross-compiling \
     --with-intl=small-icu \
     --openssl-no-asm
-} 2>&1 | tee "$LOG_DIR/configure.log"
+} 2>&1 | stdbuf -oL -eL tee "$LOG_DIR/configure.log"
 
 {
   cd "$NODE_DIR"
-  make -j"$(nproc)"
-} 2>&1 | tee "$LOG_DIR/build.log"
+  # GYP generates Makefiles; -j is the actual parallel compilation fan-out.
+  # -Oline keeps output readable while multiple compilers run concurrently.
+  make -j"$MAKE_JOBS" -Oline
+} 2>&1 | stdbuf -oL -eL tee "$LOG_DIR/build.log"
 
 LIBNODE=""
 for candidate in "$NODE_DIR/out/Release/libnode.so" "$NODE_DIR/out/Release/lib.target/libnode.so"; do
