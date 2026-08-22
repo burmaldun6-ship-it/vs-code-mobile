@@ -96,20 +96,24 @@ export CXX="aarch64-linux-android${ANDROID_API}-clang++"
 export AR="llvm-ar"
 export STRIP="llvm-strip"
 
-# Host toolchain: native runner x86_64 Linux. These must never inherit the Android linker.
-export CC_host="${CC_host:-/usr/bin/gcc}"
-export CXX_host="${CXX_host:-/usr/bin/g++}"
-export AR_host="${AR_host:-/usr/bin/ar}"
-export LINK_host="${LINK_host:-/usr/bin/g++}"
-export LD_host="${LD_host:-/usr/bin/ld}"
-unset LINK || true
+# Host toolchain: native runner x86_64 Linux. Never use the Android linker for host tools.
+export CC_host="/usr/bin/gcc"
+export CXX_host="/usr/bin/g++"
+export AR_host="/usr/bin/ar"
+export AS_host="/usr/bin/as"
+export LD_host="/usr/bin/ld"
+export NM_host="/usr/bin/nm"
+export RANLIB_host="/usr/bin/ranlib"
+export STRIP_host="/usr/bin/strip"
+export LINK_host="/usr/bin/g++"
 
-# Node.js Android GYP configuration requires android_ndk_path explicitly.
+# Keep target and host architectures separate. Node's configure uses the host toolset
+# when cross-compiling; snapshots must remain enabled so GYP creates obj.host targets.
 export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME"
 export npm_config_arch=arm64
 export npm_config_platform=android
 
-for tool in "$CC" "$CXX" "$AR" "$STRIP" "$CC_host" "$CXX_host" "$AR_host" "$LINK_host" "$LD_host"; do
+for tool in "$CC" "$CXX" "$AR" "$STRIP" "$CC_host" "$CXX_host" "$AR_host" "$AS_host" "$LD_host" "$NM_host" "$RANLIB_host" "$STRIP_host" "$LINK_host"; do
   command -v "$tool" >/dev/null || { echo "Missing tool: $tool" >&2; exit 1; }
 done
 
@@ -120,7 +124,6 @@ echo "CXX=$CXX"
 echo "CC_host=$CC_host"
 echo "CXX_host=$CXX_host"
 echo "AR_host=$AR_host"
-echo "LINK_host=$LINK_host"
 echo "LD_host=$LD_host"
 
 {
@@ -129,7 +132,7 @@ echo "LD_host=$LD_host"
     --dest-cpu=arm64 \
     --dest-os=android \
     --shared \
-    --without-snapshot \
+    --cross-compiling \
     --with-intl=small-icu \
     --openssl-no-asm
 } 2>&1 | tee "$LOG_DIR/configure.log"
