@@ -89,23 +89,39 @@ tar -xJf "$ARCHIVE" -C "$WORK_DIR"
 NODE_DIR="$WORK_DIR/node-v$NODE_VERSION"
 TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
 export PATH="$TOOLCHAIN_BIN:$PATH"
+
+# Target toolchain: Android arm64-v8a.
 export CC="aarch64-linux-android${ANDROID_API}-clang"
 export CXX="aarch64-linux-android${ANDROID_API}-clang++"
 export AR="llvm-ar"
-export LINK="$CXX"
 export STRIP="llvm-strip"
+
+# Host toolchain: native runner x86_64 Linux. These must never inherit the Android linker.
+export CC_host="${CC_host:-/usr/bin/gcc}"
+export CXX_host="${CXX_host:-/usr/bin/g++}"
+export AR_host="${AR_host:-/usr/bin/ar}"
+export LINK_host="${LINK_host:-/usr/bin/g++}"
+export LD_host="${LD_host:-/usr/bin/ld}"
+unset LINK || true
 
 # Node.js Android GYP configuration requires android_ndk_path explicitly.
 export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME"
 export npm_config_arch=arm64
 export npm_config_platform=android
 
-for tool in "$CC" "$CXX" "$AR" "$STRIP"; do command -v "$tool" >/dev/null || { echo "Missing tool: $tool" >&2; exit 1; }; done
+for tool in "$CC" "$CXX" "$AR" "$STRIP" "$CC_host" "$CXX_host" "$AR_host" "$LINK_host" "$LD_host"; do
+  command -v "$tool" >/dev/null || { echo "Missing tool: $tool" >&2; exit 1; }
+done
 
 echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
 echo "GYP_DEFINES=$GYP_DEFINES"
 echo "CC=$CC"
 echo "CXX=$CXX"
+echo "CC_host=$CC_host"
+echo "CXX_host=$CXX_host"
+echo "AR_host=$AR_host"
+echo "LINK_host=$LINK_host"
+echo "LD_host=$LD_host"
 
 {
   cd "$NODE_DIR"
