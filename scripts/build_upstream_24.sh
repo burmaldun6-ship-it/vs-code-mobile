@@ -106,30 +106,24 @@ test -f "$CPU_FEATURES_DIR/cpu-features.h"
 # but does not add the NDK cpufeatures implementation to the zlib target. Add
 # the deprecated NDK cpufeatures source directly to that target. Do not depend
 # on brittle whitespace around the source block; locate the zlib target first.
-python3 - "$NODE_DIR/deps/zlib/zlib.gyp" "$CPU_FEATURES_DIR" <<'PY'
+cp "$CPU_FEATURES_DIR/cpu-features.c" "$NODE_DIR/deps/zlib/"
+cp "$CPU_FEATURES_DIR/cpu-features.h" "$NODE_DIR/deps/zlib/"
+
+python3 - "$NODE_DIR/deps/zlib/zlib.gyp" <<'PY'
 import pathlib, sys
 p = pathlib.Path(sys.argv[1])
-cpufeatures = pathlib.Path(sys.argv[2]).as_posix()
 s = p.read_text()
 target = "          'target_name': 'zlib',"
 start = s.find(target)
-if start < 0:
-    raise SystemExit('zlib target not found; refusing to patch unknown Node source')
-source_line = "            '<!@pymod_do_main(GN-scraper \"<(ZLIB_ROOT)/BUILD.gn\" \"\\\\\"zlib\\\\\".*?sources = \")',"
-pos = s.find(source_line, start)
-if pos < 0:
-    raise SystemExit('zlib sources line not found; refusing to patch unknown Node source')
-insert_at = pos + len(source_line)
-if f"'{cpufeatures}/cpu-features.c'," not in s[start:]:
-    s = s[:insert_at] + f"\n            '{cpufeatures}/cpu-features.c'," + s[insert_at:]
-include_line = "          'include_dirs': [ '<(ZLIB_ROOT)' ],"
-pos = s.find(include_line, insert_at)
-if pos < 0:
-    raise SystemExit('zlib include_dirs line not found; refusing to patch unknown Node source')
-if f"'{cpufeatures}'" not in s[pos:pos + 200]:
-    s = s[:pos] + f"          'include_dirs': [ '<(ZLIB_ROOT)', '{cpufeatures}' ]," + s[pos + len(include_line):]
+if start < 0: raise SystemExit('zlib target not found')
+sources_start = s.find("'sources': [", start)
+if sources_start < 0: raise SystemExit('zlib sources not found')
+sources_end = s.find('],', sources_start)
+if sources_end < 0: raise SystemExit('zlib sources end not found')
+if "'<(ZLIB_ROOT)/cpu-features.c'," not in s[sources_start:sources_end]:
+    s = s[:sources_end] + "\n            '<(ZLIB_ROOT)/cpu-features.c',\n" + s[sources_end:]
 p.write_text(s)
-print('Patched zlib.gyp with NDK cpufeatures:', cpufeatures)
+print('Patched zlib.gyp with cpu-features.c')
 PY
 
 export CC="aarch64-linux-android${ANDROID_API}-clang"
