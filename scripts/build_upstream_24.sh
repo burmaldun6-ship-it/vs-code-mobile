@@ -107,9 +107,13 @@ export RANLIB_host="/usr/bin/ranlib"
 export STRIP_host="/usr/bin/strip"
 export LINK_host="/usr/bin/g++"
 
-# Keep target and host architectures separate. Node's configure uses the host toolset
-# when cross-compiling; snapshots must remain enabled so GYP creates obj.host targets.
-export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME"
+# Node 24's GYP zlib definition enables ARM NEON and compiles cpu_features.c when
+# arm_fpu=neon. Its Android path includes <cpu-features.h> and calls
+# android_getCpuFeatures(), but the GYP build does not wire Chromium's
+# third_party/cpu_features:ndk_compat GN dependency into the zlib target.
+# Disable only zlib's optional ARM SIMD path; this keeps the arm64 target intact
+# and avoids an undeclared Android cpufeatures runtime dependency.
+export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 arm_fpu=none host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME"
 export npm_config_arch=arm64
 export npm_config_platform=android
 
