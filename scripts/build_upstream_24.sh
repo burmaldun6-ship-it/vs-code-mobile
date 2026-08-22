@@ -117,11 +117,20 @@ import pathlib, sys
 p = pathlib.Path(sys.argv[1])
 cpufeatures = pathlib.Path(sys.argv[2]).as_posix()
 s = p.read_text()
-marker = "          'sources': [\n            '<!@pymod_do_main(GN-scraper \"<(ZLIB_ROOT)/BUILD.gn\" \"\\\\\"zlib\\\\\".*?sources = \")',\n          ],\n"
-replacement = "          'sources': [\n            '<!@pymod_do_main(GN-scraper \"<(ZLIB_ROOT)/BUILD.gn\" \"\\\\\"zlib\\\\\".*?sources = \")',\n            '%s/cpu-features.c',\n          ],\n          'include_dirs': [ '<(ZLIB_ROOT)', '%s' ],\n" % (cpufeatures, cpufeatures)
-if marker not in s:
+old = """          'sources': [
+            '<!@pymod_do_main(GN-scraper \"<(ZLIB_ROOT)/BUILD.gn\" \"\\\"zlib\\\".*?sources = \")',
+          ],
+          'include_dirs': [ '<(ZLIB_ROOT)' ],
+"""
+new = """          'sources': [
+            '<!@pymod_do_main(GN-scraper \"<(ZLIB_ROOT)/BUILD.gn\" \"\\\"zlib\\\".*?sources = \")',
+            '%s/cpu-features.c',
+          ],
+          'include_dirs': [ '<(ZLIB_ROOT)', '%s' ],
+""" % (cpufeatures, cpufeatures)
+if old not in s:
     raise SystemExit('zlib.gyp marker not found; refusing to patch unknown Node source')
-s = s.replace(marker, replacement, 1)
+s = s.replace(old, new, 1)
 p.write_text(s)
 PY
 
