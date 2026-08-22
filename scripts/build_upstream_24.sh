@@ -115,7 +115,7 @@ target = "          'target_name': 'zlib',"
 start = s.find(target)
 if start < 0:
     raise SystemExit('zlib target not found; refusing to patch unknown Node source')
-source_line = "            '<!@pymod_do_main(GN-scraper \"<(ZLIB_ROOT)/BUILD.gn\" \"\\\"zlib\\\".*?sources = \")',"
+source_line = "            '<!@pymod_do_main(GN-scraper \"<(ZLIB_ROOT)/BUILD.gn\" \"\\\\\"zlib\\\\\".*?sources = \")',"
 pos = s.find(source_line, start)
 if pos < 0:
     raise SystemExit('zlib sources line not found; refusing to patch unknown Node source')
