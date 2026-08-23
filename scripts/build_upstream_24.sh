@@ -141,6 +141,7 @@ export STRIP_host="/usr/bin/strip"
 export LINK_host="/usr/bin/g++"
 
 export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME"
+export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME v8_enable_trap_handler=0"
 export npm_config_arch=arm64
 export npm_config_platform=android
 
