@@ -57,7 +57,7 @@ install_ndk() {
 
 install_ndk
 sudo apt-get update
-sudo apt-get install -y --no-install-recommends build-essential git python3 gcc-multilib g++-multilib file binutils zip unzip xz-utils
+sudo apt-get install -y --no-install-recommends build-essential git python3 gcc-multilib g++-multilib file binutils zip unzip xz-utils patch
 
 {
   echo "=== build host diagnostics ==="
@@ -95,6 +95,28 @@ rm -rf "$WORK_DIR/node-v$NODE_VERSION"
 tar -xJf "$ARCHIVE" -C "$WORK_DIR"
 
 NODE_DIR="$WORK_DIR/node-v$NODE_VERSION"
+
+# Node's Android build path requires the V8 trap handler to be disabled.
+# The failed build previously reached mksnapshot with trap-handler objects still
+# enabled, producing undefined references to v8_internal_simulator_ProbeMemory
+# and RegisterDefaultTrapHandler. Upstream's Android configure flow carries an
+# Android-specific trap-handler patch; apply the equivalent fix explicitly here
+# so this standalone tarball build does not depend on a separate configure step.
+TRAP_HANDLER_H="$NODE_DIR/deps/v8/src/trap-handler/trap-handler.h"
+test -f "$TRAP_HANDLER_H"
+sed -i \\
+  -e 's/#define V8_TRAP_HANDLER_SUPPORTED true/#define V8_TRAP_HANDLER_SUPPORTED false/g' \\
+  -e 's|#define V8_TRAP_HANDLER_VIA_SIMULATOR|// #define V8_TRAP_HANDLER_VIA_SIMULATOR|' \\
+  "$TRAP_HANDLER_H"
+if grep -Eq '^#define V8_TRAP_HANDLER_SUPPORTED true' "$TRAP_HANDLER_H"; then
+  echo "Failed to disable V8 trap handler for Android" >&2
+  exit 1
+fi
+{
+  echo "V8 trap handler configuration:"
+  grep -E 'V8_TRAP_HANDLER_(SUPPORTED|VIA_SIMULATOR)' "$TRAP_HANDLER_H" || true
+} | tee "$LOG_DIR/v8-trap-handler.log"
+
 TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
 CPU_FEATURES_DIR="$ANDROID_NDK_HOME/sources/android/cpufeatures"
 export PATH="$TOOLCHAIN_BIN:$PATH"
@@ -140,7 +162,6 @@ export RANLIB_host="/usr/bin/ranlib"
 export STRIP_host="/usr/bin/strip"
 export LINK_host="/usr/bin/g++"
 
-export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME"
 export GYP_DEFINES="target_arch=arm64 v8_target_arch=arm64 android_target_arch=arm64 host_os=linux OS=android android_ndk_path=$ANDROID_NDK_HOME v8_enable_trap_handler=0"
 export npm_config_arch=arm64
 export npm_config_platform=android
