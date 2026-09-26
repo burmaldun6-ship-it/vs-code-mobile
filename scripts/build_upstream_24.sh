@@ -104,9 +104,9 @@ NODE_DIR="$WORK_DIR/node-v$NODE_VERSION"
 # so this standalone tarball build does not depend on a separate configure step.
 TRAP_HANDLER_H="$NODE_DIR/deps/v8/src/trap-handler/trap-handler.h"
 test -f "$TRAP_HANDLER_H"
-sed -i \\
-  -e 's/#define V8_TRAP_HANDLER_SUPPORTED true/#define V8_TRAP_HANDLER_SUPPORTED false/g' \\
-  -e 's|#define V8_TRAP_HANDLER_VIA_SIMULATOR|// #define V8_TRAP_HANDLER_VIA_SIMULATOR|' \\
+sed -i \
+  -e 's/#define V8_TRAP_HANDLER_SUPPORTED true/#define V8_TRAP_HANDLER_SUPPORTED false/g' \
+  -e 's|#define V8_TRAP_HANDLER_VIA_SIMULATOR|// #define V8_TRAP_HANDLER_VIA_SIMULATOR|' \
   "$TRAP_HANDLER_H"
 if grep -Eq '^#define V8_TRAP_HANDLER_SUPPORTED true' "$TRAP_HANDLER_H"; then
   echo "Failed to disable V8 trap handler for Android" >&2
