@@ -1,5 +1,6 @@
 name: Build upstream Node.js 24.19.0 for Android
 # Android V8 trap-handler fix is applied in scripts/build_upstream_24.sh.
+# Re-run after correcting shell syntax in the build script.
 
 on:
   push:
