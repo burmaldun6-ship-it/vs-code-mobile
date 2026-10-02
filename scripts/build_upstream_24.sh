@@ -186,7 +186,7 @@ echo "MAKE_JOBS=$MAKE_JOBS"
 
 {
   cd "$NODE_DIR"
-  make -j"$MAKE_JOBS" -Oline
+  make -C out/Release -j"$MAKE_JOBS" -Oline node
 } 2>&1 | stdbuf -oL -eL tee "$LOG_DIR/build.log"
 
 LIBNODE=""
